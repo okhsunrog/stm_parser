@@ -4,46 +4,40 @@ import re
 def extract_series_line(part_number_str):
     """
     Извлекает основную серию и линейку из part_number.
-    Пример: STM32L071RBT6 -> L0x1 (если STM32L071...), STM32L151CBU6 -> L151
-    Это эвристика, возможно, потребует доработки.
     """
-    part_number = str(part_number_str) # Убедимся, что это строка
+    part_number = str(part_number_str)
+    
     if part_number.startswith("STM32L0"):
-        # Эвристика для L0: STM32L0<Digit1><Digit2>...
-        # Digit1 (третья цифра после L0) обычно указывает на "категорию" или линейку
-        # 1,2 -> x1 (STM32L01x, STM32L02x)
-        # 3,4 -> x1 (STM32L03x, STM32L04x)
-        # 5,6 -> x1, x2, x3 (STM32L05x, STM32L06x)
-        # 7,8 -> x1, x2, x3 (STM32L07x, STM32L08x)
-        # 0 -> x0 (STM32L010 Value line)
-        
-        # Более простой подход: берем L0 и следующую цифру, если она не 0, то это x<digit>
-        # если 0, то L0x0.
-        # Для STM32L0x1, STM32L0x2, STM32L0x3 - они часто группируются.
-        # Для простоты пока можем сделать L0<первые две цифры после L0>
-        match_l0 = re.search(r"STM32L0(\d{2})", part_number)
-        if match_l0:
-            sub_family_digits = match_l0.group(1)
-            # Основываясь на вашем исследовании:
-            if sub_family_digits in ["10"]: # STM32L010xx Value Line
-                return "L0x0 Value Line"
-            elif sub_family_digits in ["11", "21", "31", "41", "51", "61", "71", "81"]: # STM32L0x1
-                return "L0x1"
-            elif sub_family_digits in ["52", "62", "72", "82"]: # STM32L0x2 USB
-                return "L0x2"
-            elif sub_family_digits in ["53", "63", "73", "83"]: # STM32L0x3 USB/LCD
-                return "L0x3"
-            else: # Общий случай, если эвристика не покрыла
-                return f"L0_{sub_family_digits}" # Например, L0_51, L0_71
-        return "L0_Unknown"
-        
+        match_l0 = re.match(r"STM32L0(\d{2})", part_number)
+        if not match_l0:
+            return "L0_Malformed_PN"
+        device_line_digits = match_l0.group(1)
+        if device_line_digits == "10":
+            return "L0x0"
+        elif device_line_digits in ["11", "21", "31", "41", "51", "61", "71", "81"]:
+            return "L0x1"
+        elif device_line_digits in ["52", "62", "72", "82"]:
+            return "L0x2"
+        elif device_line_digits in ["53", "63", "73", "83"]:
+            return "L0x3"
+        else:
+            return "L0_Unknown_Digits"
+            
     elif part_number.startswith("STM32L1"):
-        # Для L1: STM32L1<Digit1><Digit2>...
-        match_l1 = re.search(r"STM32L1(\d{2})", part_number)
-        if match_l1:
-            return f"L1{match_l1.group(1)}" # Например, L100, L151, L152, L162
-        return "L1_Unknown"
-    return "Unknown"
+        match_l1 = re.match(r"STM32L1(\d{2})", part_number)
+        if not match_l1:
+            return "L1_Malformed_PN"
+        device_line_digits = match_l1.group(1)
+        # L100, L151, L152, L162
+        if device_line_digits in ["00", "51", "52", "62"]: 
+            return f"L1{device_line_digits}"
+        else:
+            # Для L1 могут быть и другие, например, STM32L151xD (Cat 4), STM32L151xE (Cat 5)
+            # Пока оставляем так, но эту логику можно будет уточнить при необходимости
+            # для более детальной классификации L1.
+            # Сейчас главное - отделить L1 от L0.
+            return f"L1{device_line_digits}" # Возвращаем L1XX
+    return "Unknown_Series"
 
 
 def create_eeprom_research_csv(parquet_filepath, output_csv_filepath):
@@ -53,38 +47,47 @@ def create_eeprom_research_csv(parquet_filepath, output_csv_filepath):
         print(f"Ошибка чтения Parquet файла '{parquet_filepath}': {e}")
         return
 
-    print(f"Прочитано {len(df)} записей из Parquet.")
+    print(f"Прочитано {len(df)} записей из Parquet файла '{parquet_filepath}'.")
 
-    # Оставляем только те, где есть информация о EEPROM (data_e2prom_b > 0)
-    # и это L0 или L1
-    df_eeprom = df[
-        (df['data_e2prom_b'].fillna(0) > 0) & 
-        (df['part_number'].str.startswith('STM32L0') | df['part_number'].str.startswith('STM32L1'))
-    ].copy() # Используем .copy() чтобы избежать SettingWithCopyWarning
+    # Фильтруем только L0 и L1 серии и те, у кого есть EEPROM
+    # (столбец data_e2prom_b из вашего парсинга pandas)
+    # Убедимся, что data_e2prom_b числовой для фильтрации
+    df['data_e2prom_b'] = pd.to_numeric(df['data_e2prom_b'], errors='coerce').fillna(0)
 
-    if df_eeprom.empty:
-        print("Не найдено МК L0/L1 с информацией о EEPROM в Parquet файле.")
+    df_filtered = df[
+        (df['part_number'].str.startswith('STM32L0') | df['part_number'].str.startswith('STM32L1')) &
+        (df['data_e2prom_b'] > 0)
+    ].copy()
+
+    if df_filtered.empty:
+        print("Не найдено МК L0/L1 с информацией о EEPROM (>0 байт) в Parquet файле.")
         return
 
-    print(f"Найдено {len(df_eeprom)} МК L0/L1 с EEPROM для дальнейшего исследования.")
+    print(f"Найдено {len(df_filtered)} МК L0/L1 с EEPROM для создания исследовательского CSV.")
 
     # Создаем новый DataFrame с нужными столбцами
     research_df = pd.DataFrame()
-    research_df['part_number'] = df_eeprom['part_number']
+    research_df['part_number'] = df_filtered['part_number']
     
-    # Применяем функцию для извлечения серии/линейки
-    research_df['series_line'] = df_eeprom['part_number'].apply(extract_series_line)
+    research_df['series_line'] = df_filtered['part_number'].apply(extract_series_line)
     
-    research_df['flash_size_kb_prog'] = df_eeprom['flash_size_kb_prog']
-    research_df['ram_size_kb'] = df_eeprom['ram_size_kb']
-    research_df['total_eeprom_b_from_export'] = df_eeprom['data_e2prom_b']
+    # Копируем существующие полезные поля
+    # Убедимся, что эти столбцы существуют в вашем df_filtered
+    cols_to_copy = ['flash_size_kb_prog', 'ram_size_kb', 'data_e2prom_b']
+    for col in cols_to_copy:
+        if col in df_filtered.columns:
+            research_df[col.replace('data_e2prom_b', 'total_eeprom_b_from_export')] = df_filtered[col]
+        else:
+            print(f"Предупреждение: столбец '{col}' не найден в Parquet, будет пропущен.")
+            research_df[col.replace('data_e2prom_b', 'total_eeprom_b_from_export')] = ""
+
 
     # Добавляем пустые столбцы для ручного заполнения
     research_df['category_from_doc'] = ""
     research_df['eeprom_bank1_start_addr'] = ""
     research_df['eeprom_bank1_size_b'] = ""
-    research_df['eeprom_bank2_start_addr'] = "" # Будет NA если нет второго банка
-    research_df['eeprom_bank2_size_b'] = ""   # Будет NA если нет второго банка
+    research_df['eeprom_bank2_start_addr'] = "" 
+    research_df['eeprom_bank2_size_b'] = ""   
     research_df['eeprom_total_size_b_from_doc'] = ""
     research_df['eeprom_write_size_b'] = ""
     research_df['eeprom_erase_value'] = ""
@@ -102,15 +105,19 @@ def create_eeprom_research_csv(parquet_filepath, output_csv_filepath):
         'eeprom_write_size_b', 'eeprom_erase_value',
         'notes', 'rust_regex_map_key', 'rust_mem_entry'
     ]
-    research_df = research_df[column_order]
+    # Убедимся, что все столбцы из column_order присутствуют в research_df перед переупорядочиванием
+    final_columns = [col for col in column_order if col in research_df.columns]
+    research_df = research_df[final_columns]
+
 
     try:
         research_df.to_csv(output_csv_filepath, index=False, encoding='utf-8')
-        print(f"Создан CSV файл для исследования EEPROM: {output_csv_filepath}")
+        print(f"Создан/перезаписан CSV файл для исследования EEPROM: {output_csv_filepath}")
+        print(f"В файл записано {len(research_df)} строк.")
     except Exception as e:
         print(f"Ошибка при сохранении CSV файла '{output_csv_filepath}': {e}")
 
 if __name__ == "__main__":
-    parquet_file = "all_stm_products.parquet"
-    output_csv_for_research = "stm32_l0_l1_eeprom_research.csv"
+    parquet_file = "all_stm_products.parquet" # Убедитесь, что этот файл обновлен
+    output_csv_for_research = "stm32_l0_l1_eeprom_research.csv" # Этот файл будет перезаписан
     create_eeprom_research_csv(parquet_file, output_csv_for_research)
