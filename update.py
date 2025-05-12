@@ -20,14 +20,16 @@ def get_l1_series_line(part_number_str):
     match = re.match(r"STM32L1(\d{2})", pn)
     if not match: return "L1_Malformed_PN"
     digits = match.group(1)
-    if digits in ["00", "51", "52", "62"]: return f"L1{digits}"
-    else: return f"L1{digits}"
+    # L100, L151, L152, L162 - основные группы по первым двум цифрам
+    if digits in ["00", "51", "52", "62"]: 
+        return f"L1{digits}"
+    else: # Для других возможных L1xx, если появятся
+        return f"L1{digits}" 
 
 
-def update_l0x3_data_in_csv(csv_filepath):
+def update_l1_eeprom_data_in_csv(csv_filepath):
     """
-    Читает CSV и обновляет данные EEPROM ТОЛЬКО для линейки L0x3.
-    Предполагается, что series_line уже корректно заполнена.
+    Читает CSV и обновляет данные EEPROM ТОЛЬКО для линеек STM32L1.
     """
     try:
         df = pd.read_csv(csv_filepath, dtype=str)
@@ -42,60 +44,67 @@ def update_l0x3_data_in_csv(csv_filepath):
     print(f"Прочитано {len(df)} записей из '{csv_filepath}'.")
 
     # Преобразуем числовые столбцы для фильтров
-    numeric_cols_for_filter = ['flash_size_kb_prog', 'total_eeprom_b_from_export']
+    numeric_cols_for_filter = ['flash_size_kb_prog', 'total_eeprom_b_from_export', 'ram_size_kb'] # ram_size_kb добавлен для контекста
     for col in numeric_cols_for_filter:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int) # Приводим к int
         else:
             print(f"Предупреждение: столбец '{col}' отсутствует для преобразования в число.")
             df[col] = 0
 
-
-    print("Обновление данных EEPROM для L0x3...")
-    l0x3_mask = df['series_line'] == "L0x3"
-    eeprom_base_addr = "0x08080000"
-    eeprom_bank2_addr_cat5 = "0x08080C00"
+    print("Обновление данных EEPROM для STM32L1...")
+    # Фильтруем все STM32L1
+    l1_overall_mask = df['part_number'].str.startswith('STM32L1')
     
-    if not df[l0x3_mask].empty:
-        print(f"Найдено {len(df[l0x3_mask])} МК серии L0x3 для обновления EEPROM.")
+    if not df[l1_overall_mask].empty:
+        print(f"Найдено {len(df[l1_overall_mask])} МК серии STM32L1 для обновления EEPROM.")
     else:
-        print("МК серии L0x3 не найдены. Обновление для L0x3 не будет произведено.")
+        print("МК серии STM32L1 не найдены. Обновление для L1 не будет произведено.")
         return
 
-    # L0x3 Category 3 (STM32L053x, STM32L063x)
-    # Flash 32KB/64KB, EEPROM 2048B (2KB)
-    cat3_mask_l0x3 = l0x3_mask & \
-                     (df['flash_size_kb_prog'].isin([32, 64])) & \
-                     (df['total_eeprom_b_from_export'] == 2048)
-    df.loc[cat3_mask_l0x3, 'category_from_doc'] = 'Category 3 (L0x3)'
-    df.loc[cat3_mask_l0x3, 'eeprom_bank1_start_addr'] = eeprom_base_addr
-    df.loc[cat3_mask_l0x3, 'eeprom_bank1_size_b'] = "2048"
-    df.loc[cat3_mask_l0x3, 'eeprom_total_size_b_from_doc'] = "2048"
-    df.loc[cat3_mask_l0x3, ['eeprom_bank2_start_addr', 'eeprom_bank2_size_b']] = ""
+    # Адреса EEPROM для L1
+    eeprom_l1_bank1_addr = "0x08080000"
+    eeprom_l1_cat4_bank2_addr = "0x08081800" # Cat.4 Bank 2 starts at +6KB from Bank 1 start
+    eeprom_l1_cat5_6_bank2_addr = "0x08082000" # Cat.5/6 Bank 2 starts at +8KB from Bank 1 start
 
-    # L0x3 Category 5 (STM32L073x, STM32L083x)
-    # --- Flash 64KB, EEPROM 3072B (3KB) in Bank 2 only ---
-    cat5_64k_mask_l0x3 = l0x3_mask & \
-                         (df['flash_size_kb_prog'] == 64) & \
-                         (df['total_eeprom_b_from_export'] == 3072)
-    df.loc[cat5_64k_mask_l0x3, 'category_from_doc'] = 'Category 5 (L0x3 64K Flash)'
-    df.loc[cat5_64k_mask_l0x3, ['eeprom_bank1_start_addr', 'eeprom_bank1_size_b']] = ""
-    df.loc[cat5_64k_mask_l0x3, 'eeprom_bank2_start_addr'] = eeprom_bank2_addr_cat5
-    df.loc[cat5_64k_mask_l0x3, 'eeprom_bank2_size_b'] = "3072"
-    df.loc[cat5_64k_mask_l0x3, 'eeprom_total_size_b_from_doc'] = "3072"
+    # Обновляем данные для L1, идя по общему размеру EEPROM из экспорта
+    # и дополнительно учитывая flash_size для более точного определения категории
 
-    # --- Flash 128KB/192KB, EEPROM 6144B (6KB) total, 2 Banks of 3072B ---
-    cat5_large_mask_l0x3 = l0x3_mask & \
-                           (df['flash_size_kb_prog'].isin([128, 192])) & \
-                           (df['total_eeprom_b_from_export'] == 6144)
-    df.loc[cat5_large_mask_l0x3, 'category_from_doc'] = 'Category 5 (L0x3 ' + df.loc[cat5_large_mask_l0x3, 'flash_size_kb_prog'].astype(int).astype(str) + 'K Flash)'
-    df.loc[cat5_large_mask_l0x3, 'eeprom_bank1_start_addr'] = eeprom_base_addr
-    df.loc[cat5_large_mask_l0x3, 'eeprom_bank1_size_b'] = "3072"
-    df.loc[cat5_large_mask_l0x3, 'eeprom_bank2_start_addr'] = eeprom_bank2_addr_cat5
-    df.loc[cat5_large_mask_l0x3, 'eeprom_bank2_size_b'] = "3072"
-    df.loc[cat5_large_mask_l0x3, 'eeprom_total_size_b_from_doc'] = "6144"
+    # Cat.1 & Cat.2: EEPROM 4096B (4KB), один банк
+    cat1_2_mask_l1 = l1_overall_mask & (df['total_eeprom_b_from_export'] == 4096)
+    df.loc[cat1_2_mask_l1, 'category_from_doc'] = 'Cat.1/Cat.2 (L1)' # Уточнить, если можно разделить
+    df.loc[cat1_2_mask_l1, 'eeprom_bank1_start_addr'] = eeprom_l1_bank1_addr
+    df.loc[cat1_2_mask_l1, 'eeprom_bank1_size_b'] = "4096"
+    df.loc[cat1_2_mask_l1, 'eeprom_total_size_b_from_doc'] = "4096"
+    df.loc[cat1_2_mask_l1, ['eeprom_bank2_start_addr', 'eeprom_bank2_size_b']] = ""
+
+    # Cat.3: EEPROM 8192B (8KB), один банк
+    cat3_mask_l1 = l1_overall_mask & (df['total_eeprom_b_from_export'] == 8192)
+    df.loc[cat3_mask_l1, 'category_from_doc'] = 'Cat.3 (L1)'
+    df.loc[cat3_mask_l1, 'eeprom_bank1_start_addr'] = eeprom_l1_bank1_addr
+    df.loc[cat3_mask_l1, 'eeprom_bank1_size_b'] = "8192"
+    df.loc[cat3_mask_l1, 'eeprom_total_size_b_from_doc'] = "8192"
+    df.loc[cat3_mask_l1, ['eeprom_bank2_start_addr', 'eeprom_bank2_size_b']] = ""
+
+    # Cat.4: EEPROM 12288B (12KB) total, 2 банка по 6KB
+    cat4_mask_l1 = l1_overall_mask & (df['total_eeprom_b_from_export'] == 12288)
+    df.loc[cat4_mask_l1, 'category_from_doc'] = 'Cat.4 (L1)'
+    df.loc[cat4_mask_l1, 'eeprom_bank1_start_addr'] = eeprom_l1_bank1_addr
+    df.loc[cat4_mask_l1, 'eeprom_bank1_size_b'] = "6144"
+    df.loc[cat4_mask_l1, 'eeprom_bank2_start_addr'] = eeprom_l1_cat4_bank2_addr
+    df.loc[cat4_mask_l1, 'eeprom_bank2_size_b'] = "6144"
+    df.loc[cat4_mask_l1, 'eeprom_total_size_b_from_doc'] = "12288"
+
+    # Cat.5 & Cat.6: EEPROM 16384B (16KB) total, 2 банка по 8KB
+    cat5_6_mask_l1 = l1_overall_mask & (df['total_eeprom_b_from_export'] == 16384)
+    df.loc[cat5_6_mask_l1, 'category_from_doc'] = 'Cat.5/Cat.6 (L1)' # Уточнить, если можно разделить
+    df.loc[cat5_6_mask_l1, 'eeprom_bank1_start_addr'] = eeprom_l1_bank1_addr
+    df.loc[cat5_6_mask_l1, 'eeprom_bank1_size_b'] = "8192"
+    df.loc[cat5_6_mask_l1, 'eeprom_bank2_start_addr'] = eeprom_l1_cat5_6_bank2_addr
+    df.loc[cat5_6_mask_l1, 'eeprom_bank2_size_b'] = "8192"
+    df.loc[cat5_6_mask_l1, 'eeprom_total_size_b_from_doc'] = "16384"
     
-    print("Данные EEPROM для L0x3 обновлены.")
+    print("Данные EEPROM для STM32L1 обновлены.")
 
     try:
         df.to_csv(csv_filepath, index=False, encoding='utf-8')
@@ -109,7 +118,7 @@ if __name__ == "__main__":
     try:
         with open(research_csv_file, 'r', encoding='utf-8') as f:
             pass 
-        update_l0x3_data_in_csv(research_csv_file)
+        update_l1_eeprom_data_in_csv(research_csv_file)
     except FileNotFoundError:
         print(f"Файл '{research_csv_file}' не найден. Убедитесь, что он существует и 'series_line' корректно заполнено.")
     except Exception as e:
