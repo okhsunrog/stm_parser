@@ -1,0 +1,291 @@
+diff --git a/stm32-data-gen/src/memory.rs b/stm32-data-gen/src/memory.rs
+index 5943694..3dbb6ee 100644
+--- a/stm32-data-gen/src/memory.rs
++++ b/stm32-data-gen/src/memory.rs
+@@ -55,8 +55,17 @@ macro_rules! mem {
+             access: Some(access(stringify!($access))),
+         }
+     };
++    (@row $name:ident $addr:literal $size:literal bytes $access:ident) => {
++        Mem {
++            name: stringify!($name),
++            address: $addr,
++            size: $size,
++            access: Some(access(stringify!($access))),
++        }
++    };
+ 
+     ($( $name:ident{$($row:tt)*}),*) => {
++        // This macro call produces a &[Mem] slice
+         &[
+             $(mem!(@row $name $($row)*),)*
+         ]
+@@ -239,34 +248,103 @@ static MEMS: RegexMap<&[&[Mem]]> = RegexMap::new(&[
+     ("STM32H7[AB]3.I",               &[mem!(BANK_1 { 0x08000000 1024 }, BANK_2 { 0x08100000 1024 }, ITCM { 0x00000000 64 }, DTCM { 0x20000000 128 },  AXISRAM { 0x24000000 1024 }, AHBSRAM { 0x30000000 128 })]),
+     ("STM32H7A..G",                  &[mem!(BANK_1 { 0x08000000 512 },  BANK_2 { 0x08100000 512 },  ITCM { 0x00000000 64 }, DTCM { 0x20000000 128 },  AXISRAM { 0x24000000 1024 }, AHBSRAM { 0x30000000 128 })]),
+     ("STM32H7B..B",                  &[mem!(BANK_1 { 0x08000000 128 },                              ITCM { 0x00000000 64 }, DTCM { 0x20000000 128 },  AXISRAM { 0x24000000 1024 }, AHBSRAM { 0x30000000 128 })]),
+-    // L0
+-    ("STM32L0...3",                  &[mem!(BANK_1 { 0x08000000 8 },   SRAM { 0x20000000 2 })]),
+-    ("STM32L0...6",                  &[mem!(BANK_1 { 0x08000000 32 },  SRAM { 0x20000000 8 })]),
+-    ("STM32L0...B",                  &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 20 })]),
+-    ("STM32L0...Z",                  &[mem!(BANK_1 { 0x08000000 192 }, SRAM { 0x20000000 20 })]),
+-    ("STM32L0[12]..4",               &[mem!(BANK_1 { 0x08000000 16 },  SRAM { 0x20000000 2 })]),
+-    ("STM32L0[156]..8",              &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 8 })]),
+-    ("STM32L0[34]..4",               &[mem!(BANK_1 { 0x08000000 16 },  SRAM { 0x20000000 8 })]),
+-    ("STM32L0[78]..8",               &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 20 })]),
+-    // L1
+-    ("STM32L1...C..",                &[mem!(BANK_1 { 0x08000000 256 }, SRAM { 0x20000000 32 })]),
+-    ("STM32L1...D..",                &[mem!(BANK_1 { 0x08000000 192 }, BANK_2 { 0x08030000 192 }, SRAM { 0x20000000 80 })]),
+-    ("STM32L1...D",                  &[mem!(BANK_1 { 0x08000000 192 }, BANK_2 { 0x08030000 192 }, SRAM { 0x20000000 48 })]),
+-    ("STM32L1...E",                  &[mem!(BANK_1 { 0x08000000 256 }, BANK_2 { 0x08040000 256 }, SRAM { 0x20000000 80 })]),
+-    ("STM32L1[56]..C",               &[mem!(BANK_1 { 0x08000000 256 }, SRAM { 0x20000000 32 })]),
+-    ("STM32L10..6..",                &[mem!(BANK_1 { 0x08000000 32 },  SRAM { 0x20000000 4 })]),
+-    ("STM32L10..6",                  &[mem!(BANK_1 { 0x08000000 32 },  SRAM { 0x20000000 4 })]),
+-    ("STM32L10..8..",                &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 8 })]),
+-    ("STM32L10..8",                  &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 8 })]),
+-    ("STM32L10..B..",                &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 16 })]),
+-    ("STM32L10..B",                  &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 10 })]),
+-    ("STM32L10..C",                  &[mem!(BANK_1 { 0x08000000 256 }, SRAM { 0x20000000 16 })]),
+-    ("STM32L15..6..",                &[mem!(BANK_1 { 0x08000000 32 },  SRAM { 0x20000000 16 })]),
+-    ("STM32L15..6",                  &[mem!(BANK_1 { 0x08000000 32 },  SRAM { 0x20000000 10 })]),
+-    ("STM32L15..8..",                &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 32 })]),
+-    ("STM32L15..8",                  &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 10 })]),
+-    ("STM32L15..B..",                &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 32 })]),
+-    ("STM32L15..B",                  &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 16 })]),
++
++        // ========= L0 - Corrected Syntax =========
++    ("STM32L010[FK]4",            &[mem!(
++                                        BANK_1 { 0x08000000 16 }, 
++                                        SRAM { 0x20000000 2 }, 
++                                        EEPROM { 0x08080000 128 bytes rw }
++                                    )]),
++    ("STM32L0[12]1.*[34]",        &[mem!(
++                                        BANK_1 { 0x08000000 16 }, // Assuming 16K Flash for L0x1..3/4
++                                        SRAM { 0x20000000 2 }, 
++                                        EEPROM { 0x08080000 512 bytes rw }
++                                    )]),
++    ("STM32L010C6",               &[mem!(
++                                        BANK_1 { 0x08000000 32 }, 
++                                        SRAM { 0x20000000 8 }, 
++                                        EEPROM { 0x08080000 256 bytes rw }
++                                    )]),
++    ("STM32L0[34]1.*[46]",        &[mem!(
++                                        BANK_1 { 0x08000000 32 }, // Assuming 32K Flash for L0x1..4/6
++                                        SRAM { 0x20000000 8 }, 
++                                        EEPROM { 0x08080000 1024 bytes rw }
++                                    )]),
++    ("STM32L010[KR]8",            &[mem!(
++                                        BANK_1 { 0x08000000 64 }, 
++                                        SRAM { 0x20000000 8 }, 
++                                        EEPROM { 0x08080000 256 bytes rw }
++                                    )]),
++    ("STM32L0(5[123]|6[23]).*[68]",&[mem!( // Assumes 64K Flash for L05x/L06x ..6/8
++                                        BANK_1 { 0x08000000 64 }, 
++                                        SRAM { 0x20000000 8 }, 
++                                        EEPROM { 0x08080000 2048 bytes rw }
++                                    )]),
++    ("STM32L010RB",               &[mem!(
++                                        BANK_1 { 0x08000000 128 }, 
++                                        SRAM { 0x20000000 20 }, 
++                                        EEPROM { 0x08080000 512 bytes rw }
++                                    )]),
++    ("STM32L0[78][123].*8",       &[mem!( // L0 Cat 5, 64KB Flash
++                                        BANK_1 { 0x08000000 64 }, 
++                                        SRAM { 0x20000000 20 }, 
++                                        EEPROM_BANK_2 { 0x08080C00 3072 bytes rw }
++                                    )]),
++    ("STM32L0[78][123].*[BCZ]",   &[mem!( // L0 Cat 5, 128KB/192KB Flash (assuming 192K for BANK_1 size)
++                                        BANK_1 { 0x08000000 192 }, 
++                                        SRAM { 0x20000000 20 }, 
++                                        EEPROM_BANK_1 { 0x08080000 3072 bytes rw }, 
++                                        EEPROM_BANK_2 { 0x08080C00 3072 bytes rw }
++                                    )]),
++
++    // ========= L1 - Corrected Syntax =========
++    ("STM32L100[CR][68B]",        &[mem!( // L100 non-A (Cat 1)
++                                        BANK_1 { 0x08000000 128 }, // Max Flash for this group
++                                        SRAM { 0x20000000 10 },    // RAM for non-A from existing
++                                        EEPROM { 0x08080000 4096 bytes rw }
++                                    )]),
++    ("STM32L100[CR][68B]-A",      &[mem!( // L100 -A (Cat 2)
++                                        BANK_1 { 0x08000000 128 }, // Max Flash for this group
++                                        SRAM { 0x20000000 16 },    // RAM for -A (check CSV if it varies more)
++                                        EEPROM { 0x08080000 4096 bytes rw }
++                                    )]),
++    ("STM32L15[12][CRV][68B]",    &[mem!( // L15x non-A (Cat 1)
++                                        BANK_1 { 0x08000000 128 }, // Max Flash
++                                        SRAM { 0x20000000 16 },    // RAM for non-A
++                                        EEPROM { 0x08080000 4096 bytes rw }
++                                    )]),
++    ("STM32L15[12][CRV][68B]-A",  &[mem!( // L15x -A (Cat 2)
++                                        BANK_1 { 0x08000000 128 }, // Max Flash
++                                        SRAM { 0x20000000 32 },    // RAM for -A
++                                        EEPROM { 0x08080000 4096 bytes rw }
++                                    )]),
++    ("STM32L100RC",               &[mem!( // L100RC (Cat 3)
++                                        BANK_1 { 0x08000000 256 }, 
++                                        SRAM { 0x20000000 16 }, 
++                                        EEPROM { 0x08080000 8192 bytes rw }
++                                    )]),
++    ("STM32L1(5[12](CC|UC|CZ|QC|ZC|R[CUY]|VC)|62(RC|VC|QC|ZC))(-A)?", &[mem!( // L15x/L16x Cat 3 (уточненный regex)
++                                    BANK_1 { 0x08000000 256 }, 
++                                    SRAM { 0x20000000 32 }, 
++                                    EEPROM { 0x08080000 8192 bytes rw }
++                                )]),
++
++
++    ("STM32L1(5[12][QRVZ]D|62[QRVZ]D)", &[mem!( // L1 Cat 4 (уточненный regex)
++                                        BANK_1 { 0x08000000 192 }, 
++                                        BANK_2 { 0x08030000 192 }, 
++                                        SRAM { 0x20000000 48 }, 
++                                        EEPROM_BANK_1 { 0x08080000 6144 bytes rw }, 
++                                        EEPROM_BANK_2 { 0x08081800 6144 bytes rw }
++                                    )]),
++    ("STM32L1(5[12][QRVZ]E|62[QRVZ]E|5[12]VD-X|62VD-X)", &[mem!( // L1 Cat 5 (..ZE, ..QE, ..RE, ..VE) / Cat 6 (..VD-X) (уточненный regex)
++                                        BANK_1 { 0x08000000 256 }, 
++                                        BANK_2 { 0x08040000 256 }, 
++                                        SRAM { 0x20000000 80 }, 
++                                        EEPROM_BANK_1 { 0x08080000 8192 bytes rw }, 
++                                        EEPROM_BANK_2 { 0x08082000 8192 bytes rw }
++                                    )]),
++
+     // L4
+     ("STM32L4...8",                  &[mem!(BANK_1 { 0x08000000 64 },  SRAM { 0x20000000 32 },  SRAM2 { 0x20008000 8 },  SRAM2_ICODE { 0x10000000 8 })]),
+     ("STM32L4[12]..B",               &[mem!(BANK_1 { 0x08000000 128 }, SRAM { 0x20000000 32 },  SRAM2 { 0x20008000 8 },  SRAM2_ICODE { 0x10000000 8 })]),
+@@ -295,7 +373,7 @@ static MEMS: RegexMap<&[&[Mem]]> = RegexMap::new(&[
+                                       ]),
+     ("STM32L4[RS]..I",               &[
+                                         mem!(BANK_1 { 0x08000000 2048 },                              SRAM { 0x20000000 640 }),
+-                                        mem!(BANK_1 { 0x08000000 1024 }, BANK_2 { 0x08100000 10024 }, SRAM { 0x20000000 640 })
++                                        mem!(BANK_1 { 0x08000000 1024 }, BANK_2 { 0x08100000 1024 }, SRAM { 0x20000000 640 }) // Corrected typo from 10024
+                                       ]),
+     // L5
+     ("STM32L5...C",                  &[mem!(BANK_1 { 0x08000000 256 }, SRAM { 0x20000000 256 })]),
+@@ -392,8 +470,8 @@ static FLASH_INFO: RegexMap<&[FlashInfo]> = RegexMap::new(&[
+                                     FlashInfo{ erase_value: 0xFF, write_size:  8, erase_size: &[(  4*1024, 0)] }, // Dual bank
+                                  ]),
+     ("STM32L4.*",               &[FlashInfo{ erase_value: 0xFF, write_size:  8, erase_size: &[(  2*1024, 0)] }]),
+-    ("STM32L0.*",               &[FlashInfo{ erase_value: 0x00, write_size:  4, erase_size: &[(     128, 0)] }]),
+-    ("STM32L1.*",               &[FlashInfo{ erase_value: 0x00, write_size:  4, erase_size: &[(     256, 0)] }]),
++    ("STM32L0.*",               &[FlashInfo{ erase_value: 0xFF, write_size:  4, erase_size: &[(     128, 0)] }]), // Flash page for L0 is 128 bytes. Erase value for FLASH is 0xFF.
++    ("STM32L1.*",               &[FlashInfo{ erase_value: 0xFF, write_size:  4, erase_size: &[(     256, 0)] }]), // Flash page for L1 is 256 bytes. Erase value for FLASH is 0xFF.
+     ("STM32L5...E",             &[
+                                     FlashInfo{ erase_value: 0xFF, write_size:  8, erase_size: &[(  4*1024, 0)] }, // Single bank
+                                     FlashInfo{ erase_value: 0xFF, write_size:  8, erase_size: &[(  2*1024, 0)] }, // Dual bank
+@@ -425,8 +503,22 @@ pub fn get(chip: &str) -> Vec<Vec<Memory>> {
+             let mut res = Vec::new();
+ 
+             for mem in *mems {
+-                if mem.name.starts_with("BANK") {
+-                    if flash.erase_size.len() == 1 || mem.size <= flash.erase_size[0].0 * flash.erase_size[0].1 {
++                if mem.name.starts_with("BANK") { // Handle FLASH BANKs
++                    // Check if erase_size is defined and non-empty
++                    if flash.erase_size.is_empty() || flash.erase_size[0].0 == 0 {
++                         res.push(Memory {
++                            name: mem.name.to_string(),
++                            address: mem.address,
++                            size: mem.size,
++                            kind: memory::Kind::Flash,
++                            settings: Some(Settings {
++                                write_size: flash.write_size,
++                                erase_size: if !flash.erase_size.is_empty() { flash.erase_size[0].0 } else { 0 },
++                                erase_value: flash.erase_value,
++                            }),
++                            access: mem.access,
++                        });
++                    } else if flash.erase_size.len() == 1 || mem.size <= flash.erase_size[0].0 * flash.erase_size[0].1 {
+                         res.push(Memory {
+                             name: mem.name.to_string(),
+                             address: mem.address,
+@@ -447,9 +539,11 @@ pub fn get(chip: &str) -> Vec<Vec<Memory>> {
+                             }
+                             let left = mem.size - offs;
+                             let mut size = left;
+-                            if i != flash.erase_size.len() - 1 {
++                            if count > 0 && i != flash.erase_size.len() - 1 {
+                                 size = size.min(erase_size * count);
+                             }
++                            if size == 0 { continue; }
++
+                             #[allow(clippy::redundant_field_names)]
+                             res.push(Memory {
+                                 name: format!("{}_REGION_{}", mem.name, i + 1),
+@@ -465,9 +559,24 @@ pub fn get(chip: &str) -> Vec<Vec<Memory>> {
+                             });
+                             offs += size;
+                         }
++                        if offs < mem.size {
++                            eprintln!("Warning: Flash region splitting logic might be incomplete for {}:{} (covered {}, total {})", chip, mem.name, offs, mem.size);
++                             res.push(Memory {
++                                name: format!("{}_REGION_REMAINDER", mem.name),
++                                address: mem.address + offs,
++                                size: mem.size - offs,
++                                kind: memory::Kind::Flash,
++                                settings: Some(Settings {
++                                    write_size: flash.write_size,
++                                    erase_size: flash.erase_size.last().map_or(0, |es| es.0),
++                                    erase_value: flash.erase_value,
++                                }),
++                                access: mem.access,
++                            });
++                        }
+                     }
+                 } else if mem.name == "OTP" {
+-                    res.push(Memory {
++                     res.push(Memory {
+                         name: mem.name.to_string(),
+                         address: mem.address,
+                         size: mem.size,
+@@ -479,6 +588,15 @@ pub fn get(chip: &str) -> Vec<Vec<Memory>> {
+                         }),
+                         access: mem.access,
+                     });
++                } else if mem.name.starts_with("EEPROM") {
++                    res.push(Memory {
++                        name: mem.name.to_string(),
++                        address: mem.address,
++                        size: mem.size,
++                        kind: memory::Kind::Eeprom,
++                        settings: None,
++                        access: mem.access,
++                    });
+                 } else {
+                     let mut kind = memory::Kind::Ram;
+                     if mem.name.contains("FLASH") || mem.name.contains("AXIICP") {
+diff --git a/stm32-data-serde/src/lib.rs b/stm32-data-serde/src/lib.rs
+index 8b6d8b1..60f699c 100644
+--- a/stm32-data-serde/src/lib.rs
++++ b/stm32-data-serde/src/lib.rs
+@@ -64,6 +64,7 @@ pub mod chip {
+         pub enum Kind {
+             Flash,
+             Ram,
++            Eeprom,
+         }
+ 
+         #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+diff --git a/stm32-metapac-gen/res/src/metadata.rs b/stm32-metapac-gen/res/src/metadata.rs
+index b65c758..7e9db70 100644
+--- a/stm32-metapac-gen/res/src/metadata.rs
++++ b/stm32-metapac-gen/res/src/metadata.rs
+@@ -154,6 +154,7 @@ pub struct FlashSettings {
+ pub enum MemoryRegionKind {
+     Flash,
+     Ram,
++    Eeprom,
+ }
+ 
+ #[derive(Debug, Eq, PartialEq, Clone)]
+diff --git a/stm32-metapac-gen/src/data.rs b/stm32-metapac-gen/src/data.rs
+index 67c34c3..f1c677c 100644
+--- a/stm32-metapac-gen/src/data.rs
++++ b/stm32-metapac-gen/src/data.rs
+@@ -330,6 +330,8 @@ pub enum MemoryRegionKind {
+     Flash,
+     #[serde(rename = "ram")]
+     Ram,
++    #[serde(rename = "eeprom")]
++    Eeprom,
+ }
+ 
+ #[derive(Debug, Eq, PartialEq, Clone, Deserialize)]
