@@ -12,7 +12,7 @@ research_file_csv = "stm32_l0_l1_eeprom_research.csv"
 original_json_dir = Path("/home/okhsunrog/temp/generated_data/original/data/chips")
 w_eeprom_json_dir = Path("/home/okhsunrog/temp/generated_data/w_eeprom/data/chips")
 
-DEBUG_PRINT_ADDED_EEPROM = False  # <--- Set this to True to print EEPROM sections
+DEBUG_PRINT_ADDED_EEPROM = True  # <--- Set this to True to print EEPROM sections
 DEBUG_VERBOSE_JSON_DIFF = (
     True  # <--- Set this for verbose DeepDiff output on structure mismatches
 )
