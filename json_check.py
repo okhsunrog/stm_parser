@@ -68,7 +68,9 @@ def get_memory_regions_by_kind(chip_data, kind):
 
 import json
 
-from deepdiff import DeepDiff  # You might need to install this: pip install deepdiff
+from deepdiff import \
+    DeepDiff  # You might need to install this: pip install deepdiff
+from deepdiff import Delta
 
 
 def compare_json_objects_smart(obj1, obj2, chip_name, verbose_diff=False):
@@ -76,10 +78,9 @@ def compare_json_objects_smart(obj1, obj2, chip_name, verbose_diff=False):
         "STM32L1"
     )
 
-    obj1_copy = json.loads(json.dumps(obj1))  # Deep copy
-    obj2_copy = json.loads(json.dumps(obj2))  # Deep copy
+    obj1_copy = json.loads(json.dumps(obj1))
+    obj2_copy = json.loads(json.dumps(obj2))
 
-    # Standardize by removing EEPROM for L0/L1 to compare the rest
     if is_l0_l1_chip_local:
         if "memory" in obj1_copy and isinstance(obj1_copy["memory"], list):
             for bank_list_idx in range(len(obj1_copy["memory"])):
@@ -98,40 +99,87 @@ def compare_json_objects_smart(obj1, obj2, chip_name, verbose_diff=False):
                         if not (isinstance(mem, dict) and mem.get("kind") == "eeprom")
                     ]
 
-    are_equal = obj1_copy == obj2_copy
+    diff = DeepDiff(
+        obj1_copy, obj2_copy, ignore_order=True, report_repetition=True, verbose_level=0
+    )
 
-    if (
-        not are_equal and verbose_diff
-    ):  # Only print diff if requested and they are not equal
-        print(f"DEBUG: Detailed differences for {chip_name}:")
-        # Sort keys for more stable diff, especially at the top level
-        # For very complex diffs, you might need a more sophisticated approach
-        # or just focus on specific keys known to cause issues.
-
-        # Using DeepDiff for a more structured output
-        diff = DeepDiff(
-            obj1_copy,
-            obj2_copy,
-            ignore_order=True,
-            report_repetition=True,
-            verbose_level=2,
-        )  # ignore_order can be helpful
-        if diff:
-            print(diff.pretty())
-        else:
-            # If deepdiff finds them equal with ignore_order, but direct == failed, it implies order was the issue.
+    if diff:
+        if verbose_diff:
             print(
-                "DEBUG: DeepDiff (ignoring order) found no differences, but direct equality failed. Likely an order issue in a list."
+                f"DEBUG: Detailed differences for {chip_name} (after removing EEPROM for L0/L1):"
             )
-            # For manual inspection if DeepDiff doesn't pinpoint it well enough:
-            # for key in set(obj1_copy.keys()) | set(obj2_copy.keys()):
-            #     if obj1_copy.get(key) != obj2_copy.get(key):
-            #         print(f"  Key '{key}' differs.")
-            #         # print(f"    Original : {obj1_copy.get(key)}")
-            #         # print(f"    W_EEPROM: {obj2_copy.get(key)}")
-            #         # Be careful printing large structures
 
-    return are_equal
+            # Check for the specific "memory[0] added/removed" pattern
+            is_mem0_diff = False
+            if (
+                "iterable_item_added" in diff
+                and "root['memory'][0]" in diff["iterable_item_added"]
+            ):
+                is_mem0_diff = True
+            if (
+                "iterable_item_removed" in diff
+                and "root['memory'][0]" in diff["iterable_item_removed"]
+            ):
+                is_mem0_diff = True
+
+            if (
+                is_mem0_diff
+                and obj1_copy.get("memory")
+                and isinstance(obj1_copy["memory"], list)
+                and len(obj1_copy["memory"]) > 0
+                and isinstance(obj1_copy["memory"][0], list)
+                and obj2_copy.get("memory")
+                and isinstance(obj2_copy["memory"], list)
+                and len(obj2_copy["memory"]) > 0
+                and isinstance(obj2_copy["memory"][0], list)
+            ):
+
+                print("  Specific diff for root['memory'][0]:")
+                # Diff the contents of memory[0] more directly
+                mem0_obj1 = obj1_copy["memory"][0]
+                mem0_obj2 = obj2_copy["memory"][0]
+
+                # Sort by name to make comparison more stable if order is the only issue
+                # within the list of memory regions
+                try:
+                    mem0_obj1_sorted = sorted(
+                        mem0_obj1, key=lambda x: x.get("name", "")
+                    )
+                    mem0_obj2_sorted = sorted(
+                        mem0_obj2, key=lambda x: x.get("name", "")
+                    )
+                    item_diff = DeepDiff(
+                        mem0_obj1_sorted,
+                        mem0_obj2_sorted,
+                        ignore_order=False,
+                        report_repetition=True,
+                    )  # ignore_order=False here
+                    if item_diff:
+                        print(
+                            f"    Diff of memory[0] (sorted by name): {item_diff.pretty()}"
+                        )
+                    else:
+                        print(
+                            f"    Memory[0] lists are semantically identical when sorted by name (likely just order or minor internal diffs DeepDiff summarized)."
+                        )
+                        print(
+                            f"    Original memory[0]: {json.dumps(mem0_obj1, indent=2)}"
+                        )
+                        print(
+                            f"    W_EEPROM memory[0]: {json.dumps(mem0_obj2, indent=2)}"
+                        )
+
+                except TypeError:  # If items are not dicts or don't have 'name'
+                    print(
+                        f"    Could not sort memory[0] items by name for detailed diff."
+                    )
+                    print(f"    Original memory[0]: {json.dumps(mem0_obj1, indent=2)}")
+                    print(f"    W_EEPROM memory[0]: {json.dumps(mem0_obj2, indent=2)}")
+            else:
+                # General diff if not the memory[0] pattern or if memory[0] is not as expected
+                print(diff.pretty())
+        return False
+    return True
 
 
 # --- Main Checking Logic ---
